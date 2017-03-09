@@ -39,6 +39,7 @@ With Simple and github pages you can easily create your static blog. Here is wha
 * Code highlight support
 * Tex formula support
 * Responsive html
+* Drag and drop to upload image
 
 ##Custom
 

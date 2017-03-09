@@ -17,6 +17,7 @@ function reescape(data) {
 function mdupdate() {
     var converter = new Showdown.converter();
     var tmp = $("#editmd").val();
+    sessionStorage.setItem("editmd", tmp);
     tmp = tmp.replace(/~~~~\{(.*)\}\n([\s\S]*?)~~~~\n/mg, function(a1, a2, a3) {return "<pre><code class=\"language-"+a2+"\">"+reescape(a3)+"</code></pre>";});
     tmp = tmp.replace(/~~~~\n([\s\S]*?)~~~~\n/mg, function(a1, a2) {return "<pre><code>"+reescape(a2)+"</code></pre>"});
     tmp = converter.makeHtml(tmp);
@@ -182,7 +183,7 @@ $(document).ready(function() {
                     $("#postpath").val("");
                     $("#postdate").val("");
                     $("#posttags").val("");
-                    $("#editmd").val("");
+                    $("#editmd").val(sessionStorage.getItem("editmd") || "before begin to write please click 'new post' or 'new page' first");
                     $("#edithtml").html("");
                     var config = JSON.parse(data);
                     config.posts.sort(function(a, b){
@@ -238,14 +239,16 @@ $(document).ready(function() {
                         $("#postpath").val(now.path);
                         $("#postdate").val(now.date);
                         $("#posttags").val(now.tags);
-                        $("#loading").show();
-                        repo.read("master", now.path, function(err, data) {
-                            $("#loading").hide();
-                            var content = data.match(contentpattern)[1];
-                            var md = data.match(mdpattern)[1];
-                            $("#editmd").val(md);
-                            $("#edithtml").html(content);
-                        });
+                        if (now.path.slice(0, 5) != "http:" && now.path.slice(0, 6) != "https:") {
+                            $("#loading").show();
+                            repo.read("master", now.path, function(err, data) {
+                                $("#loading").hide();
+                                var content = data.match(contentpattern)[1];
+                                var md = data.match(mdpattern)[1];
+                                $("#editmd").val(md);
+                                $("#edithtml").html(content);
+                            });
+                        }
                     }
                 });
             }
@@ -285,10 +288,16 @@ $(document).ready(function() {
                             gconfig.pages = posts;
                         }
                         repo.write("master", "main.json", JSON.stringify(gconfig), "remove", function(err) {
-                            repo.delete("master", now.path, function(err) {
+                            if (now.path.slice(0, 5) != "http:" && now.path.slice(0, 6) != "https:") {
+                                repo.delete("master", now.path, function(err) {
+                                    temp.posts.init(param);
+                                    temp.posts.active();
+                                });
+                            }
+                            else {
                                 temp.posts.init(param);
                                 temp.posts.active();
-                            });
+                            }
                         });
                     }
                     else {
@@ -331,14 +340,24 @@ $(document).ready(function() {
                                 data = data.replace(contentpattern, "<!-- content -->\n"+content+"\n<!-- content end -->\n");
                                 data = data.replace("//path//", now.path);
                                 data = data.replace(mdpattern, "<!-- markdown -->\n"+md+"\n<!-- markdown end -->\n");
-                                repo.write("master", now.path, data, "save", function(err) {
+                                if (now.path.slice(0, 5) != "http:" && now.path.slice(0, 6) != "https:") {
+                                    repo.write("master", now.path, data, "save", function(err) {
+                                        repo.write("master", "main.json", JSON.stringify(gconfig), "save", function(err) {
+                                            if (!errShow($("saveerror", err))) {
+                                                temp.posts.init(param);
+                                                temp.posts.active();
+                                            }
+                                        });    
+                                    });
+                                }
+                                else {
                                     repo.write("master", "main.json", JSON.stringify(gconfig), "save", function(err) {
                                         if (!errShow($("saveerror", err))) {
                                             temp.posts.init(param);
                                             temp.posts.active();
                                         }
-                                    });    
-                                });
+                                    });
+                                }
                             },
                             error: function(e) {err(e);}
                         });
@@ -357,5 +376,53 @@ $(document).ready(function() {
     new SimpleApp();
     $("#editmd").on("keyup", function() {
         mdupdate();
+    });
+    $("#editmd").on("dragenter", function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+    });
+    $("#editmd").on("dragover", function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+    });
+    $("#editmd").on("drop", function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        var a = e.originalEvent;
+        var files = a.target.files || a.dataTransfer && a.dataTransfer.files;
+        var tmp = null;
+        for (var i = 0; i < files.length; i++) {
+            if (files[i].type.match("image.*")) {
+                tmp = files[i];
+                break;
+            }
+        }
+        if (tmp != null) {
+            var reader = new FileReader();
+            reader.onload = function() {
+                var name = tmp.name;
+                var data = reader.result;
+                var cursor = $("#editmd")[0].selectionStart;
+                var content = $("#editmd").val();
+                var l = content.length;
+                var head = content.substring(0, cursor);
+                var tail = content.substring(cursor, l);
+                var url = " ![](http://"+global.user+".github.io/img/"+name+")";
+                $("#editmd").val(head+"<span class=\"loading\">upload image now!</span>"+tail);
+                mdupdate();
+                repo.write("master", "img/"+name, data, "upload image",
+                           function(e) {
+                               if (typeof err != "undefined" && err != null) {
+                                   console.log(err);
+                                   $("#editmd").val(head+"upload image failed"+tail);
+                               }
+                               else {
+                                   $("#editmd").val(head+url+tail);
+                               }
+                               mdupdate();
+                });
+            };
+            reader.readAsArrayBuffer(tmp);
+        }
     });
 });
